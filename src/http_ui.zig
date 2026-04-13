@@ -189,9 +189,9 @@ fn sendDashboard(shared: *state_mod.SharedState, client: std.posix.socket_t) !vo
         selectedAttr(snapshot.config.capture_mode == .tone),
         selectedAttr(snapshot.config.capture_mode == .silence),
         selectedAttr(snapshot.config.capture_mode == .stdin_f32le),
-        snapshot.config.client_id.slice(),
-        snapshot.config.client_name.slice(),
-        snapshot.config.stream_name.slice(),
+        if (snapshot.config.client_id.slice().len > 0) snapshot.config.client_id.slice() else config_mod.default_client_id,
+        if (snapshot.config.client_name.slice().len > 0) snapshot.config.client_name.slice() else config_mod.default_client_name,
+        if (snapshot.config.stream_name.slice().len > 0) snapshot.config.stream_name.slice() else config_mod.default_stream_name,
         checkedAttr(snapshot.config.enabled),
         snapshot.status.endpoint.slice(),
         snapshot.status.last_packet_ns,
@@ -203,10 +203,17 @@ fn sendDashboard(shared: *state_mod.SharedState, client: std.posix.socket_t) !vo
 
 fn sendHealth(shared: *state_mod.SharedState, client: std.posix.socket_t) !void {
     const snapshot = shared.snapshot();
-    var buffer: [512]u8 = undefined;
-    const body = try std.fmt.bufPrint(&buffer, "{{\"state\":\"{s}\",\"endpoint\":\"{s}\"}}", .{
+    const client_id = if (snapshot.config.client_id.slice().len > 0) snapshot.config.client_id.slice() else config_mod.default_client_id;
+    const client_name = if (snapshot.config.client_name.slice().len > 0) snapshot.config.client_name.slice() else config_mod.default_client_name;
+    const stream_name = if (snapshot.config.stream_name.slice().len > 0) snapshot.config.stream_name.slice() else config_mod.default_stream_name;
+    var buffer: [1024]u8 = undefined;
+    const body = try std.fmt.bufPrint(&buffer, "{{\"state\":\"{s}\",\"endpoint\":\"{s}\",\"client_id\":\"{s}\",\"client_name\":\"{s}\",\"stream_name\":\"{s}\",\"capture_mode\":\"{s}\"}}", .{
         @tagName(snapshot.status.sender_state),
         snapshot.status.endpoint.slice(),
+        client_id,
+        client_name,
+        stream_name,
+        network_mod.captureModeLabel(snapshot.config.capture_mode),
     });
     try sendResponse(client, 200, "application/json", body);
 }
@@ -229,11 +236,11 @@ fn applyFormBody(config: *config_mod.Config, body: []const u8) !void {
         } else if (std.mem.eql(u8, key, "port")) {
             config.port = try std.fmt.parseInt(u16, value, 10);
         } else if (std.mem.eql(u8, key, "client_id")) {
-            try config.client_id.set(value);
+            try config.client_id.set(if (value.len > 0) value else config_mod.default_client_id);
         } else if (std.mem.eql(u8, key, "client_name")) {
-            try config.client_name.set(value);
+            try config.client_name.set(if (value.len > 0) value else config_mod.default_client_name);
         } else if (std.mem.eql(u8, key, "stream_name")) {
-            try config.stream_name.set(value);
+            try config.stream_name.set(if (value.len > 0) value else config_mod.default_stream_name);
         } else if (std.mem.eql(u8, key, "capture_mode")) {
             config.capture_mode = parseCaptureMode(value) orelse return error.UnknownCaptureMode;
         }

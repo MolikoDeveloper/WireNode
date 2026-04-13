@@ -122,6 +122,9 @@ fn runUdpSession(shared: *state_mod.SharedState, revision: u64, config: config_m
 
     const endpoint = try std.fmt.allocPrint(shared.allocator, "{s}:{d}", .{ config.host.slice(), config.port });
     defer shared.allocator.free(endpoint);
+    const client_id = effectiveClientId(config);
+    const client_name = effectiveClientName(config);
+    const stream_name = effectiveStreamName(config);
 
     const stream_id: u32 = @truncate(@as(u64, @intCast(std.time.nanoTimestamp())));
     var hello_header = network_mod.PacketHeader{
@@ -137,9 +140,17 @@ fn runUdpSession(shared: *state_mod.SharedState, revision: u64, config: config_m
         .platform = .macos,
         .capture_mode = config.capture_mode,
     };
-    network_mod.writeStringField(&hello_payload.client_id, config.client_id.slice());
-    network_mod.writeStringField(&hello_payload.client_name, config.client_name.slice());
-    network_mod.writeStringField(&hello_payload.stream_name, config.stream_name.slice());
+    network_mod.writeStringField(&hello_payload.client_id, client_id);
+    network_mod.writeStringField(&hello_payload.client_name, client_name);
+    network_mod.writeStringField(&hello_payload.stream_name, stream_name);
+    std.log.info("wirenode hello udp: stream_id={} endpoint={s} client_id=\"{s}\" client_name=\"{s}\" stream_name=\"{s}\" capture={s}", .{
+        stream_id,
+        endpoint,
+        client_id,
+        client_name,
+        stream_name,
+        @tagName(config.capture_mode),
+    });
     try sendPacket(sock, server, std.mem.asBytes(&hello_header), std.mem.asBytes(&hello_payload));
 
     var packet_index: u32 = 0;
@@ -225,6 +236,9 @@ fn runUdpCaptureSession(
 
     const endpoint = try std.fmt.allocPrint(shared.allocator, "{s}:{d}", .{ config.host.slice(), config.port });
     defer shared.allocator.free(endpoint);
+    const client_id = effectiveClientId(config);
+    const client_name = effectiveClientName(config);
+    const stream_name = effectiveStreamName(config);
 
     const stream_id: u32 = @truncate(@as(u64, @intCast(std.time.nanoTimestamp())));
     var sample_rate_hz: u32 = config.sample_rate_hz;
@@ -242,9 +256,17 @@ fn runUdpCaptureSession(
         .platform = .macos,
         .capture_mode = .system_default,
     };
-    network_mod.writeStringField(&hello_payload.client_id, config.client_id.slice());
-    network_mod.writeStringField(&hello_payload.client_name, config.client_name.slice());
-    network_mod.writeStringField(&hello_payload.stream_name, config.stream_name.slice());
+    network_mod.writeStringField(&hello_payload.client_id, client_id);
+    network_mod.writeStringField(&hello_payload.client_name, client_name);
+    network_mod.writeStringField(&hello_payload.stream_name, stream_name);
+    std.log.info("wirenode hello udp: stream_id={} endpoint={s} client_id=\"{s}\" client_name=\"{s}\" stream_name=\"{s}\" capture={s}", .{
+        stream_id,
+        endpoint,
+        client_id,
+        client_name,
+        stream_name,
+        @tagName(network_mod.CaptureMode.system_default),
+    });
     try sendPacket(sock, server, std.mem.asBytes(&hello_header), std.mem.asBytes(&hello_payload));
 
     var packet_index: u32 = 0;
@@ -338,6 +360,21 @@ fn sendPacket(sock: std.posix.socket_t, server: std.net.Address, header_bytes: [
     @memcpy(buffer[0..header_bytes.len], header_bytes);
     @memcpy(buffer[header_bytes.len..total], payload_bytes);
     _ = try std.posix.sendto(sock, buffer[0..total], 0, &server.any, server.getOsSockLen());
+}
+
+fn effectiveClientId(config: config_mod.Config) []const u8 {
+    const value = config.client_id.slice();
+    return if (value.len > 0) value else config_mod.default_client_id;
+}
+
+fn effectiveClientName(config: config_mod.Config) []const u8 {
+    const value = config.client_name.slice();
+    return if (value.len > 0) value else config_mod.default_client_name;
+}
+
+fn effectiveStreamName(config: config_mod.Config) []const u8 {
+    const value = config.stream_name.slice();
+    return if (value.len > 0) value else config_mod.default_stream_name;
 }
 
 fn frameCountBytes(frames: usize, channels: u8, sample_size: usize) usize {

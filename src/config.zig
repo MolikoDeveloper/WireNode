@@ -5,6 +5,9 @@ pub const default_config_path = "/etc/WireNode/config.json";
 pub const ui_bind_host = "0.0.0.0";
 pub const ui_port: u16 = 17877;
 pub const fixed_string_capacity: usize = 256;
+pub const default_client_id = "wirenode-macos";
+pub const default_client_name = "WireNode";
+pub const default_stream_name = "Mac System Audio";
 
 pub const FixedString = struct {
     buf: [fixed_string_capacity]u8 = [_]u8{0} ** fixed_string_capacity,
@@ -53,9 +56,9 @@ pub const Config = struct {
             .enabled = true,
             .host = FixedString.init("127.0.0.1"),
             .port = 45920,
-            .client_id = FixedString.init("wirenode-macos"),
-            .client_name = FixedString.init("WireNode"),
-            .stream_name = FixedString.init("Mac System Audio"),
+            .client_id = FixedString.init(default_client_id),
+            .client_name = FixedString.init(default_client_name),
+            .stream_name = FixedString.init(default_stream_name),
             .capture_mode = .system_default,
             .sample_rate_hz = 48_000,
             .channels = 2,
@@ -69,9 +72,9 @@ const StoredConfig = struct {
     enabled: bool = true,
     host: []const u8 = "127.0.0.1",
     port: u16 = 45920,
-    client_id: []const u8 = "wirenode-macos",
-    client_name: []const u8 = "WireNode",
-    stream_name: []const u8 = "Mac System Audio",
+    client_id: []const u8 = default_client_id,
+    client_name: []const u8 = default_client_name,
+    stream_name: []const u8 = default_stream_name,
     capture_mode: network_mod.CaptureMode = .system_default,
     sample_rate_hz: u32 = 48_000,
     channels: u8 = 2,
@@ -164,15 +167,19 @@ fn fromStored(stored: StoredConfig) !Config {
     config.enabled = stored.enabled;
     try config.host.set(stored.host);
     config.port = stored.port;
-    try config.client_id.set(stored.client_id);
-    try config.client_name.set(stored.client_name);
-    try config.stream_name.set(stored.stream_name);
+    try config.client_id.set(defaultIfEmpty(stored.client_id, default_client_id));
+    try config.client_name.set(defaultIfEmpty(stored.client_name, default_client_name));
+    try config.stream_name.set(defaultIfEmpty(stored.stream_name, default_stream_name));
     config.capture_mode = stored.capture_mode;
     config.sample_rate_hz = stored.sample_rate_hz;
     config.channels = @max(@as(u8, 1), stored.channels);
     config.frames_per_packet = @max(@as(u16, 16), stored.frames_per_packet);
     config.tone_hz = stored.tone_hz;
     return config;
+}
+
+fn defaultIfEmpty(value: []const u8, fallback: []const u8) []const u8 {
+    return if (value.len > 0) value else fallback;
 }
 
 fn captureModeLabel(mode: network_mod.CaptureMode) []const u8 {

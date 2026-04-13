@@ -122,9 +122,9 @@ fn runUdpSession(shared: *state_mod.SharedState, revision: u64, config: config_m
 
     const endpoint = try std.fmt.allocPrint(shared.allocator, "{s}:{d}", .{ config.host.slice(), config.port });
     defer shared.allocator.free(endpoint);
-    const client_id = effectiveClientId(config);
-    const client_name = effectiveClientName(config);
-    const stream_name = effectiveStreamName(config);
+    const client_id = effectiveClientId(&config);
+    const client_name = effectiveClientName(&config);
+    const stream_name = effectiveStreamName(&config);
 
     const stream_id: u32 = @truncate(@as(u64, @intCast(std.time.nanoTimestamp())));
     var hello_header = network_mod.PacketHeader{
@@ -236,9 +236,9 @@ fn runUdpCaptureSession(
 
     const endpoint = try std.fmt.allocPrint(shared.allocator, "{s}:{d}", .{ config.host.slice(), config.port });
     defer shared.allocator.free(endpoint);
-    const client_id = effectiveClientId(config);
-    const client_name = effectiveClientName(config);
-    const stream_name = effectiveStreamName(config);
+    const client_id = effectiveClientId(&config);
+    const client_name = effectiveClientName(&config);
+    const stream_name = effectiveStreamName(&config);
 
     const stream_id: u32 = @truncate(@as(u64, @intCast(std.time.nanoTimestamp())));
     var sample_rate_hz: u32 = config.sample_rate_hz;
@@ -362,17 +362,17 @@ fn sendPacket(sock: std.posix.socket_t, server: std.net.Address, header_bytes: [
     _ = try std.posix.sendto(sock, buffer[0..total], 0, &server.any, server.getOsSockLen());
 }
 
-fn effectiveClientId(config: config_mod.Config) []const u8 {
+fn effectiveClientId(config: *const config_mod.Config) []const u8 {
     const value = config.client_id.slice();
     return if (value.len > 0) value else config_mod.default_client_id;
 }
 
-fn effectiveClientName(config: config_mod.Config) []const u8 {
+fn effectiveClientName(config: *const config_mod.Config) []const u8 {
     const value = config.client_name.slice();
     return if (value.len > 0) value else config_mod.default_client_name;
 }
 
-fn effectiveStreamName(config: config_mod.Config) []const u8 {
+fn effectiveStreamName(config: *const config_mod.Config) []const u8 {
     const value = config.stream_name.slice();
     return if (value.len > 0) value else config_mod.default_stream_name;
 }

@@ -182,7 +182,7 @@ fn defaultIfEmpty(value: []const u8, fallback: []const u8) []const u8 {
     return if (value.len > 0) value else fallback;
 }
 
-fn captureModeLabel(mode: network_mod.CaptureMode) []const u8 {
+pub fn captureModeLabel(mode: network_mod.CaptureMode) []const u8 {
     return switch (mode) {
         .tone => "tone",
         .silence => "silence",

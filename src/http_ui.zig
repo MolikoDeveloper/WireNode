@@ -213,7 +213,7 @@ fn sendHealth(shared: *state_mod.SharedState, client: std.posix.socket_t) !void 
         client_id,
         client_name,
         stream_name,
-        network_mod.captureModeLabel(snapshot.config.capture_mode),
+        config_mod.captureModeLabel(snapshot.config.capture_mode),
     });
     try sendResponse(client, 200, "application/json", body);
 }

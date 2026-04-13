@@ -10,8 +10,18 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
+    exe.root_module.addIncludePath(b.path("src"));
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/macos_capture_bridge.m"),
+        .flags = &.{ "-fobjc-arc", "-fblocks" },
+    });
+    exe.root_module.linkFramework("Foundation", .{});
+    exe.root_module.linkFramework("CoreAudio", .{});
+    exe.root_module.linkSystemLibrary("objc", .{});
+    exe.root_module.linkSystemLibrary("System", .{});
 
     b.installArtifact(exe);
 

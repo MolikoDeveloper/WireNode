@@ -2,7 +2,7 @@ const std = @import("std");
 const network_mod = @import("protocol.zig");
 
 pub const default_config_path = "/etc/WireNode/config.json";
-pub const ui_bind_host = "127.0.0.1";
+pub const ui_bind_host = "0.0.0.0";
 pub const ui_port: u16 = 17877;
 pub const fixed_string_capacity: usize = 256;
 

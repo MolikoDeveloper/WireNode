@@ -3,15 +3,21 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_SRC="$ROOT_DIR/zig-out/bin/wirenode"
-BIN_DST="/usr/local/libexec/wirenode/wirenode"
+APP_ROOT="/usr/local/libexec/WireNode.app"
+BIN_DST="$APP_ROOT/Contents/MacOS/wirenode"
+INFO_PLIST_SRC="$ROOT_DIR/assets/WireNode.Info.plist"
+INFO_PLIST_DST="$APP_ROOT/Contents/Info.plist"
 PLIST_SRC="$ROOT_DIR/assets/com.wiredeck.wirenode.plist"
 PLIST_DST="/Library/LaunchDaemons/com.wiredeck.wirenode.plist"
 
 cd "$ROOT_DIR"
-zig build -Doptimize=ReleaseSmall
+./scripts/build-macos.sh ReleaseSmall
 
-sudo install -d /usr/local/libexec/wirenode /Library/LaunchDaemons /etc/WireNode
+sudo install -d "$APP_ROOT/Contents/MacOS" /Library/LaunchDaemons /etc/WireNode
 sudo install -m 755 "$BIN_SRC" "$BIN_DST"
+sudo install -d "$APP_ROOT/Contents/Frameworks"
+sudo install -m 755 "$ROOT_DIR/zig-out/lib/libwirenode_macos_capture.dylib" "$APP_ROOT/Contents/Frameworks/libwirenode_macos_capture.dylib"
+sudo install -m 644 "$INFO_PLIST_SRC" "$INFO_PLIST_DST"
 if [[ ! -f /etc/WireNode/config.json ]]; then
   sudo "$BIN_DST" --write-default-config
 fi
@@ -22,4 +28,4 @@ else
   sudo launchctl bootstrap system "$PLIST_DST"
 fi
 
-echo "WireNode instalado. UI local: http://127.0.0.1:17877"
+echo "WireNode instalado. UI: http://<ip-de-tu-mac>:17877"

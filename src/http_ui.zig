@@ -172,7 +172,7 @@ fn sendDashboard(shared: *state_mod.SharedState, client: std.posix.socket_t) !vo
         \\        <p>endpoint: <code>{s}</code></p>
         \\        <p>último paquete: <code>{d}</code></p>
         \\        <p>error: <code>{s}</code></p>
-        \\        <div class="warn">La vía de transporte y la persistencia ya están implementadas. La captura real de audio del sistema en macOS requiere un backend Core Audio Tap con autorización del usuario; eso no puede resolverse limpiamente como daemon puro antes del primer login.</div>
+        \\        <div class="warn">Con <code>system-default</code>, WireNode usa Core Audio taps en macOS 14.2+. La primera vez, macOS puede pedir permiso para capturar audio del sistema. Después de concederlo, el permiso queda recordado para el bundle instalado.</div>
         \\      </section>
         \\    </div>
         \\  </main>

@@ -5,11 +5,12 @@
 ## Lo que queda implementado aquí
 
 - daemon Zig para segundo plano
-- UI local por HTTP en `http://127.0.0.1:17877`
+- UI por HTTP en `http://<ip-de-tu-mac>:17877`
 - persistencia en `/etc/WireNode/config.json`
 - plantilla `launchd` para iniciar antes de login
 - transporte UDP compatible con `WireDeck`
 - identidad estable de cliente por `client_id`
+- backend macOS `system-default` usando Core Audio taps
 
 ## Límite real de plataforma
 
@@ -17,16 +18,17 @@ Hay una restricción que conviene dejar explícita:
 
 - `launchd` puede arrancar el daemon antes de login
 - la captura real del audio del sistema en macOS no es equivalente a “leer el mixer global sin más”
-- la vía moderna para hacerlo sin driver virtual firmado pasa por un backend Core Audio Tap y autorización del usuario
-- por eso, el transporte, la UI y la persistencia ya están listas, pero el backend `system-default` se deja como punto de integración pendiente
+- la vía soportada pasa por Core Audio taps y autorización del usuario
+- el permiso se pide la primera vez que el binario corre desde un bundle con `NSAudioCaptureUsageDescription`
+- una vez concedido, el sistema recuerda la autorización para ese bundle
 
-Eso significa que hoy puedes validar el recorrido completo con `tone` o `silence`, y el siguiente paso técnico serio es implementar el capturador Core Audio Tap dentro de `WireNode`.
+Eso significa que hoy puedes validar con `system-default`, `tone`, `silence` o `stdin-f32le`. Lo que sigue después ya no es “capturar audio”, sino endurecer el empaquetado y el arranque de servicio.
 
 ## Build
 
 ```bash
 cd WireNode
-zig build
+./scripts/build-macos.sh Debug
 ```
 
 ## Configuración inicial
@@ -40,7 +42,16 @@ zig-out/bin/wirenode --write-default-config
 Luego abre:
 
 ```text
-http://127.0.0.1:17877
+http://<ip-de-tu-mac>:17877
+```
+
+## Ejecutar desde un bundle local
+
+Para que el prompt de permiso use el `Info.plist` correcto durante pruebas locales:
+
+```bash
+cd WireNode
+./scripts/run-macos.sh
 ```
 
 ## Instalación en macOS
@@ -52,7 +63,9 @@ cd WireNode
 
 Ese script:
 
-- instala el binario en `/usr/local/libexec/wirenode/wirenode`
+- compila `WireNode`
+- instala el binario dentro de `/usr/local/libexec/WireNode.app`
+- instala la `dylib` del backend macOS en `Contents/Frameworks`
 - crea `/etc/WireNode/config.json` si no existe
 - instala `assets/com.wiredeck.wirenode.plist` en `/Library/LaunchDaemons/`
 - registra o reinicia el daemon con `launchctl`

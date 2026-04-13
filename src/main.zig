@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const network_mod = @import("protocol.zig");
 const config_mod = @import("config.zig");
 const state_mod = @import("state.zig");
 const http_ui = @import("http_ui.zig");
+const macos_capture = @import("macos_capture.zig");
 
 const CliOptions = struct {
     config_path: []const u8 = config_mod.default_config_path,
@@ -37,7 +39,7 @@ pub fn main() !void {
         ui_thread.join();
     }
 
-    shared.setStatus(.waiting_for_config, "", "UI lista en http://127.0.0.1:17877");
+    shared.setStatus(.waiting_for_config, "", "UI lista en http://<ip-de-este-mac>:17877");
     runSenderLoop(&shared) catch |err| {
         shared.setStatus(.@"error", "", @errorName(err));
         return err;
@@ -77,12 +79,10 @@ fn runSenderLoop(shared: *state_mod.SharedState) !void {
         }
 
         if (snapshot.config.capture_mode == .system_default) {
-            shared.setStatus(
-                .degraded,
-                "",
-                "System audio capture backend pendiente. El transporte UDP y la UI ya estan listos; falta integrar Core Audio Tap con autorizacion del usuario.",
-            );
-            std.Thread.sleep(5 * std.time.ns_per_s);
+            runSystemDefaultSession(shared, snapshot.revision, snapshot.config) catch |err| {
+                shared.setStatus(.degraded, "", @errorName(err));
+                std.Thread.sleep(2 * std.time.ns_per_s);
+            };
             continue;
         }
 
@@ -91,6 +91,28 @@ fn runSenderLoop(shared: *state_mod.SharedState) !void {
             std.Thread.sleep(2 * std.time.ns_per_s);
         };
     }
+}
+
+fn runSystemDefaultSession(shared: *state_mod.SharedState, revision: u64, config: config_mod.Config) !void {
+    if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+    if (!macos_capture.supported()) return error.UnsupportedMacOSVersion;
+
+    var backend_error: [256]u8 = [_]u8{0} ** 256;
+    var capture = macos_capture.CaptureDevice.start(config.channels, config.frames_per_packet, false, &backend_error) catch |err| {
+        const message = std.mem.sliceTo(&backend_error, 0);
+        if (message.len > 0) {
+            shared.setStatus(.degraded, "", message);
+        }
+        return err;
+    };
+    defer capture.stop();
+
+    if (std.mem.sliceTo(&backend_error, 0).len > 0) {
+        shared.setStatus(.degraded, "", std.mem.sliceTo(&backend_error, 0));
+    } else {
+        shared.setStatus(.idle, "", "Esperando audio del sistema o permiso de captura.");
+    }
+    try runUdpCaptureSession(shared, revision, config, &capture);
 }
 
 fn runUdpSession(shared: *state_mod.SharedState, revision: u64, config: config_mod.Config) !void {
@@ -181,6 +203,117 @@ fn runUdpSession(shared: *state_mod.SharedState, revision: u64, config: config_m
 
         const sleep_ns = @as(u64, frame_count) * std.time.ns_per_s / config.sample_rate_hz;
         std.Thread.sleep(sleep_ns);
+    }
+
+    var goodbye = hello_header;
+    goodbye.kind = .goodbye;
+    goodbye.frames = 0;
+    goodbye.sequence = packet_index;
+    goodbye.sender_time_ns = @intCast(std.time.nanoTimestamp());
+    try sendPacket(sock, server, std.mem.asBytes(&goodbye), "");
+}
+
+fn runUdpCaptureSession(
+    shared: *state_mod.SharedState,
+    revision: u64,
+    config: config_mod.Config,
+    capture: *macos_capture.CaptureDevice,
+) !void {
+    const server = try std.net.Address.resolveIp(config.host.slice(), config.port);
+    const sock = try std.posix.socket(server.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
+    defer std.posix.close(sock);
+
+    const endpoint = try std.fmt.allocPrint(shared.allocator, "{s}:{d}", .{ config.host.slice(), config.port });
+    defer shared.allocator.free(endpoint);
+
+    const stream_id: u32 = @truncate(@as(u64, @intCast(std.time.nanoTimestamp())));
+    var sample_rate_hz: u32 = config.sample_rate_hz;
+    var channel_count: u32 = config.channels;
+    var hello_header = network_mod.PacketHeader{
+        .kind = .hello,
+        .codec = .pcm_float32,
+        .channels = @intCast(channel_count),
+        .sample_rate_hz = sample_rate_hz,
+        .frames = config.frames_per_packet,
+        .stream_id = stream_id,
+        .sender_time_ns = @intCast(std.time.nanoTimestamp()),
+    };
+    var hello_payload = network_mod.HelloPayload{
+        .platform = .macos,
+        .capture_mode = .system_default,
+    };
+    network_mod.writeStringField(&hello_payload.client_id, config.client_id.slice());
+    network_mod.writeStringField(&hello_payload.client_name, config.client_name.slice());
+    network_mod.writeStringField(&hello_payload.stream_name, config.stream_name.slice());
+    try sendPacket(sock, server, std.mem.asBytes(&hello_header), std.mem.asBytes(&hello_payload));
+
+    var packet_index: u32 = 0;
+    var last_hello_ns: i128 = std.time.nanoTimestamp();
+    var last_keepalive_ns: i128 = std.time.nanoTimestamp();
+
+    const sample_capacity = @as(usize, config.frames_per_packet) * @max(@as(usize, config.channels), 2);
+    var sample_storage = try shared.allocator.alloc(f32, sample_capacity);
+    defer shared.allocator.free(sample_storage);
+
+    const packet_capacity = @sizeOf(network_mod.PacketHeader) + sample_capacity * @sizeOf(f32);
+    var packet_buffer = try shared.allocator.alloc(u8, packet_capacity);
+    defer shared.allocator.free(packet_buffer);
+
+    while (!shared.shouldStop()) {
+        if (shared.currentRevision() != revision) break;
+
+        var actual_rate_hz: u32 = sample_rate_hz;
+        var actual_channels: u32 = channel_count;
+        const frame_count = capture.read(
+            sample_storage,
+            config.frames_per_packet,
+            250,
+            &actual_rate_hz,
+            &actual_channels,
+        );
+        if (frame_count > 0) {
+            sample_rate_hz = actual_rate_hz;
+            channel_count = actual_channels;
+            hello_header.sample_rate_hz = sample_rate_hz;
+            hello_header.channels = @intCast(channel_count);
+
+            var header = network_mod.PacketHeader{
+                .kind = .audio,
+                .codec = .pcm_float32,
+                .channels = @intCast(channel_count),
+                .sample_rate_hz = sample_rate_hz,
+                .frames = @intCast(frame_count),
+                .sequence = packet_index,
+                .stream_id = stream_id,
+                .sender_time_ns = @intCast(std.time.nanoTimestamp()),
+            };
+
+            const payload_bytes = frameCountBytes(frame_count, @intCast(channel_count), @sizeOf(f32));
+            @memcpy(packet_buffer[0..@sizeOf(network_mod.PacketHeader)], std.mem.asBytes(&header));
+            @memcpy(
+                packet_buffer[@sizeOf(network_mod.PacketHeader) .. @sizeOf(network_mod.PacketHeader) + payload_bytes],
+                std.mem.sliceAsBytes(sample_storage[0 .. frame_count * channel_count]),
+            );
+            _ = try std.posix.sendto(sock, packet_buffer[0 .. @sizeOf(network_mod.PacketHeader) + payload_bytes], 0, &server.any, server.getOsSockLen());
+            shared.markPacketSent(endpoint);
+            packet_index +%= 1;
+        }
+
+        const now_ns = std.time.nanoTimestamp();
+        if (now_ns - last_hello_ns >= 2 * std.time.ns_per_s) {
+            hello_header.sender_time_ns = @intCast(now_ns);
+            try sendPacket(sock, server, std.mem.asBytes(&hello_header), std.mem.asBytes(&hello_payload));
+            last_hello_ns = now_ns;
+        }
+        if (now_ns - last_keepalive_ns >= std.time.ns_per_s) {
+            var keepalive = hello_header;
+            keepalive.kind = .keepalive;
+            keepalive.frames = 0;
+            keepalive.sequence = packet_index;
+            keepalive.sender_time_ns = @intCast(now_ns);
+            try sendPacket(sock, server, std.mem.asBytes(&keepalive), "");
+            last_keepalive_ns = now_ns;
+        }
     }
 
     var goodbye = hello_header;
